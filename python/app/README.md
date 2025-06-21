@@ -37,7 +37,7 @@ Vor dem Starten der App müssen im ```../python/``` Ordner folgende Schritte aus
 ```dockerfile
 FROM python:3.11
 WORKDIR /app
-RUN git clone https://github.com/Progaros/flask-app.git .
+RUN git clone https://github.com/Progaros/ptc4gtfs_demo.git .
 WORKDIR /app/python
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
