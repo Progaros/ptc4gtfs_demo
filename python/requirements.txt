@@ -1,0 +1,12 @@
+pandas 
+sqlalchemy 
+rich 
+rapidfuzz
+Flask
+networkx
+gtfs2nx
+plotly 
+tqdm
+Graphviz
+requests
+netgraph

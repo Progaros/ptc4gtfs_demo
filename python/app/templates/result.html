@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>PTC4GTFS Demo Result</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    .collapsible-group {
+      background: #fff;
+      border-radius: 7px;
+      margin: -1.5em 0;
+      box-shadow: 0 1px 4px #0001;
+      padding: 0.7em 1em;
+      transition: box-shadow 0.2s;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .collapsible-group .summary {
+      font-size: 1.08em;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-block;
+      margin-left: 0.3em;
+      transition: color 0.2s;
+    }
+
+    .collapsible-group .summary:hover {
+      color: #0074d9;
+    }
+
+    .collapsible-group .arrow {
+      font-size: 1.1em;
+      vertical-align: middle;
+      transition: transform 0.2s;
+      user-select: none;
+    }
+
+    .collapsible-group .details {
+      margin: 0.7em 0 0 2.2em;
+      padding: 0;
+      list-style: disc inside;
+      color: #444;
+      font-size: 0.98em;
+    }
+
+    .collapsible-group .details li {
+      margin-bottom: 0.2em;
+    }
+  </style>
+</head>
+
+<body>
+  {% if from_lat is none or from_lon is none or to_lat is none or to_lon is none %}
+  <div style="color:red; font-weight:bold; margin:2em;">
+    Fehler: Ungültige oder nicht gefundene Station(en). <a href="{{ url_for('mvg_form') }}">Zurück zur Suche</a>
+  </div>
+  <script>
+    // Verhindere weitere JS-Ausführung
+    document.addEventListener("DOMContentLoaded", function () {
+      document.getElementById('spinner')?.remove();
+      document.getElementById('path-result')?.remove();
+      document.getElementById('fetch-time')?.remove();
+    });
+  </script>
+  {% else %}
+  <div class="container">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <a href="{{ url_for('mvg_form') }}" class="back-btn" title="Zurück">&#8592;</a>
+      <h2 style="margin: 0;">PTC4GTFS Demo</h2>
+    </div>
+    <div class="info">
+      Von: <strong>{{ from_station }}</strong><br>
+      Nach: <strong>{{ to_station }}</strong><br>
+      Um: <strong>{{ search_time }}</strong><br>
+    </div>
+    <h3 style="margin-top:0;">Route Map</h3>
+    <div id="map"></div>
+    <small>
+      <a href="https://www.openstreetmap.org/?mlat={{ from_lat }}&amp;mlon={{ from_lon }}#map=14/{{ from_lat }}/{{ from_lon }}"
+        target="_blank">View larger map</a>
+    </small>
+    <hr>
+    <h3>Routen-Ausgabe</h3>
+    <div id="spinner" style="text-align:center; margin:2em;">
+      <svg width="50" height="50" viewBox="0 0 50 50">
+        <circle cx="25" cy="25" r="20" fill="none" stroke="#0074d9" stroke-width="5" stroke-linecap="round"
+          stroke-dasharray="31.4 31.4" transform="rotate(-90 25 25)">
+          <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="1s"
+            repeatCount="indefinite" />
+        </circle>
+      </svg>
+      <div>Lade Verbindung...</div>
+    </div>
+    <pre id="path-result"
+      style="background:#f8f8f8; padding:1em; border-radius:5px; max-height:400px; overflow:auto;"></pre>
+    <div id="fetch-time" style="margin-top:0.5em; color:#888;"></div>
+  </div>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    var fromLat = {{ from_lat }};
+    var fromLon = {{ from_lon }};
+    var toLat = {{ to_lat }};
+    var toLon = {{ to_lon }};
+
+    var map = L.map('map').setView([(fromLat + toLat) / 2, (fromLon + toLon) / 2], 13);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Add "From" marker with label
+    L.marker([fromLat, fromLon]).addTo(map)
+      .bindPopup('From: {{ from_station }}');
+
+    // Add "To" marker with label
+    L.marker([toLat, toLon]).addTo(map)
+      .bindPopup('To: {{ to_station }}');
+
+    // Draw Luftlinie between the markers
+    var polyline = L.polyline([
+      [fromLat, fromLon],
+      [toLat, toLon]
+    ], { color: 'blue', dashArray: '5, 10' }).addTo(map);
+
+    var bounds = L.latLngBounds([[fromLat, fromLon], [toLat, toLon]]);
+    map.fitBounds(bounds, { padding: [50, 50] });
+
+    // --- AJAX call to /find_path ---
+    document.addEventListener("DOMContentLoaded", function () {
+      const spinner = document.getElementById('spinner');
+      const resultPre = document.getElementById('path-result');
+      const fetchTime = document.getElementById('fetch-time');
+      const t0 = performance.now();
+
+      fetch('/find_path', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: `from_id={{ from_station_id | urlencode }}&to_id={{ to_station_id | urlencode }}`
+      })
+        .then(response => response.json())
+        .then(data => {
+          const t1 = performance.now();
+          spinner.style.display = 'none';
+          resultPre.style.display = 'block';
+
+          let stops = data.stops || [];
+
+          if (data.error) {
+            resultPre.style.color = "red";
+            resultPre.textContent = "Fehler: " + data.error;
+            fetchTime.textContent = "";
+            resultPre.scrollIntoView({ behavior: "smooth" });
+            return;
+          }
+
+          resultPre.style.color = ""; // Reset color on success
+
+          if (data.segments) {
+            // Group consecutive segments by route_name
+            let grouped = [];
+            let current = null;
+            data.segments.forEach((seg, i) => {
+              if (!current || seg.route_name !== current.route_name) {
+                if (current) grouped.push(current);
+                current = {
+                  route_name: seg.route_name || seg.route_id || '?',
+                  from: seg.from_stop_name,
+                  to: seg.to_stop_name,
+                  stops: [seg.from_stop_name]
+                };
+              }
+              // Only push to_stop_name if it's not already the last in the list
+              if (current.stops[current.stops.length - 1] !== seg.to_stop_name) {
+                current.stops.push(seg.to_stop_name);
+              }
+              current.to = seg.to_stop_name;
+              if (i === data.segments.length - 1 && current) grouped.push(current);
+            });
+
+            // Build HTML with collapsible sections
+            let html = grouped.map((g, i) => {
+              let stopsList = g.stops.map(s => `<li>${s}</li>`).join('');
+              return `
+                <div class="collapsible-group">
+                  <div class="collapsible-header" style="display:flex;align-items:center;cursor:pointer;">
+                    <span class="arrow">&#9654;</span>
+                    <span class="summary">${i + 1}. ${g.from} <b>&rarr; ${g.route_name}</b> &rarr; ${g.to}</span>
+                  </div>
+                  <ul class="details" style="display:none;">${stopsList}</ul>
+                </div>
+              `;
+            }).join('');
+
+            resultPre.innerHTML = html;
+
+            // Add expand/collapse logic
+            resultPre.querySelectorAll('.collapsible-group').forEach(group => {
+              const header = group.querySelector('.collapsible-header');
+              const arrow = group.querySelector('.arrow');
+              const details = group.querySelector('.details');
+              header.addEventListener('click', () => {
+                const expanded = details.style.display === 'block';
+                details.style.display = expanded ? 'none' : 'block';
+                arrow.style.transform = expanded ? 'rotate(0deg)' : 'rotate(90deg)';
+              });
+            });
+          } else {
+            // fallback to old path output if needed
+            let text = stops.map((s, i) =>
+              `${i + 1}. ${s.stop_name} (${s.stop_id}) [${s.lat}, ${s.lon}]`
+            ).join('\n');
+            resultPre.textContent = text;
+          }
+
+          // Show fetch time
+          fetchTime.textContent = `fetched in ${(t1 - t0) / 1000.0} sec`;
+
+          // Draw path on map
+          let latlngs = stops.filter(s => s.lat && s.lon).map(s => [s.lat, s.lon]);
+          if (latlngs.length > 1) {
+            L.polyline(latlngs, { color: 'red', weight: 5 }).addTo(map);
+            map.fitBounds(latlngs, { padding: [50, 50] });
+            // Remove luftlinie after route is drawn
+            map.removeLayer(polyline);
+          }
+          // Add markers for each stop
+          stops.forEach(s => {
+            if (s.lat && s.lon) {
+              L.circleMarker([s.lat, s.lon], { radius: 6, color: 'red' }).addTo(map)
+                .bindPopup(s.stop_name);
+            }
+          });
+        })
+        .catch(err => {
+          spinner.style.display = 'none';
+          resultPre.style.display = 'block';
+          resultPre.style.color = "red";
+          resultPre.textContent = "Fehler: " + err.message;
+          fetchTime.textContent = "";
+          resultPre.scrollIntoView({ behavior: "smooth" });
+        });
+    });
+  </script>
+  {% endif %}
+</body>
+
+</html>

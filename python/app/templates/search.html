@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>PTC4GTFS Demo</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+</head>
+
+<body>
+  <div class="container">
+    <h2>PTC4GTFS Demo</h2>
+    <form method="get" action="{{ url_for('result') }}">
+      <label for="from_id">Von:</label>
+      <select name="from_id" id="from_id" required style="width:100%">
+        <option value="">Select stop</option>
+        {% for stop in stops %}
+        <option value="{{ stop.stop_id }}">{{ stop.stop_name }}</option>
+        {% endfor %}
+      </select><br><br>
+      <label for="to_id">Nach:</label>
+      <select name="to_id" id="to_id" required style="width:100%">
+        <option value="">Select stop</option>
+        {% for stop in stops %}
+        <option value="{{ stop.stop_id }}">{{ stop.stop_name }}</option>
+        {% endfor %}
+      </select><br><br>
+      <button type="submit">Suchen</button>
+    </form>
+  </div>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+  <script>
+    $(document).ready(function () {
+      $('#from_id').select2({
+        theme: 'default',
+        width: 'resolve',
+        placeholder: 'Select stop'
+      });
+      $('#to_id').select2({
+        theme: 'default',
+        width: 'resolve',
+        placeholder: 'Select stop'
+      });
+
+      function focusSelect2SearchField() {
+        setTimeout(function () {
+          let searchField = document.querySelector('.select2-container--open .select2-search__field');
+          if (searchField) searchField.focus();
+        }, 0);
+      }
+
+      $('#from_id').on('select2:open', focusSelect2SearchField);
+      $('#to_id').on('select2:open', focusSelect2SearchField);
+
+      // Also focus on click (for some browsers)
+      $('.select2-selection').on('mousedown', function () {
+        setTimeout(function () {
+          let searchField = document.querySelector('.select2-container--open .select2-search__field');
+          if (searchField) searchField.focus();
+        }, 0);
+      });
+    });
+  </script>
+</body>
+
+</html>
