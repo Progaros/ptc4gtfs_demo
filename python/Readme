@@ -2,12 +2,12 @@
 
 ## Small Demo
 
-[Readme](./simple_demo/README.md)
+[Readme](simple_demo/README.md)
 
 ## MVV Daten 
 
-[Readme](./ptc4gtfs/README.md)
+[Readme](ptc4gtfs/README.md)
 
 ## Deployable Application
 
-[Readme](./app/README.md)
+[Readme](app/README.md)
