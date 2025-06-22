@@ -4,6 +4,7 @@ from ptc4gtfs.db import GTFSDatabase
 from ptc4gtfs.model import load_networkx_ptc4gtfs_graph
 from ptc4gtfs.ptc import find_path_in_ptc4gtfs_graph
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 app = Flask(__name__)
 db = GTFSDatabase("sqlite:///./gtfs.db")
@@ -129,8 +130,7 @@ def result():
     from_lon = from_stop["stop_lon"] if from_stop else None
     to_lat = to_stop["stop_lat"] if to_stop else None
     to_lon = to_stop["stop_lon"] if to_stop else None
-    # Add current time as search_time (format: HH:MM)
-    search_time = datetime.now().strftime("%H:%M")
+    search_time = datetime.now(ZoneInfo("Europe/Berlin")).strftime("%H:%M")
     return render_template(
         "result.html",
         from_station=from_stop["stop_name"] if from_stop else from_id,
@@ -141,7 +141,7 @@ def result():
         from_lon=from_lon,
         to_lat=to_lat,
         to_lon=to_lon,
-        search_time=search_time,  # <-- add this
+        search_time=search_time,
     )
 
 

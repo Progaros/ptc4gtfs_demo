@@ -75,14 +75,9 @@
       Nach: <strong>{{ to_station }}</strong><br>
       Um: <strong>{{ search_time }}</strong><br>
     </div>
-    <h3 style="margin-top:0;">Route Map</h3>
     <div id="map"></div>
-    <small>
-      <a href="https://www.openstreetmap.org/?mlat={{ from_lat }}&amp;mlon={{ from_lon }}#map=14/{{ from_lat }}/{{ from_lon }}"
-        target="_blank">View larger map</a>
-    </small>
     <hr>
-    <h3>Routen-Ausgabe</h3>
+    <h3 id="route-header" style="display:none;">Routen-Ausgabe</h3>
     <div id="spinner" style="text-align:center; margin:2em;">
       <svg width="50" height="50" viewBox="0 0 50 50">
         <circle cx="25" cy="25" r="20" fill="none" stroke="#0074d9" stroke-width="5" stroke-linecap="round"
@@ -94,7 +89,17 @@
       <div>Lade Verbindung...</div>
     </div>
     <pre id="path-result"
-      style="background:#f8f8f8; padding:1em; border-radius:5px; max-height:400px; overflow:auto;"></pre>
+      style="background:#f8f8f8; padding:1em; border-radius:5px; max-height:400px; overflow:auto; display:none;"></pre>
+
+    <!-- Raw Data collapsible -->
+    <div class="collapsible-group" id="raw-data-group"
+      style="margin-top:1.5em; box-shadow: none; padding: 0; margin: 0; display:none;">
+      <div class="collapsible-header" id="raw-data-header" style="display:flex;align-items:center;cursor:pointer;">
+        <span style="font-weight: bold;" id="raw-data-toggle">Rohdaten anzeigen</span>
+      </div>
+      <pre id="raw-data-content" class="details"
+        style="display:none; background:#f3f3f3; border-radius:5px; padding:1em; margin: 1em 0; max-height:300px; overflow:auto;"></pre>
+    </div>
     <div id="fetch-time" style="margin-top:0.5em; color:#888;"></div>
   </div>
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -133,6 +138,19 @@
       const spinner = document.getElementById('spinner');
       const resultPre = document.getElementById('path-result');
       const fetchTime = document.getElementById('fetch-time');
+      const rawDataHeader = document.getElementById('raw-data-header');
+      const rawDataContent = document.getElementById('raw-data-content');
+      const rawDataToggle = document.getElementById('raw-data-toggle');
+      const rawDataGroup = document.getElementById('raw-data-group');
+      const routeHeader = document.getElementById('route-header');
+
+      // Collapsible logic for raw data (toggle text)
+      rawDataHeader.addEventListener('click', function () {
+        const expanded = rawDataContent.style.display === 'block';
+        rawDataContent.style.display = expanded ? 'none' : 'block';
+        rawDataToggle.textContent = expanded ? 'Rohdaten anzeigen' : 'Rohdaten verstecken';
+      });
+
       const t0 = performance.now();
 
       fetch('/find_path', {
@@ -147,6 +165,7 @@
           const t1 = performance.now();
           spinner.style.display = 'none';
           resultPre.style.display = 'block';
+          routeHeader.style.display = 'block';
 
           let stops = data.stops || [];
 
@@ -154,6 +173,8 @@
             resultPre.style.color = "red";
             resultPre.textContent = "Fehler: " + data.error;
             fetchTime.textContent = "";
+            rawDataContent.textContent = "";
+            rawDataGroup.style.display = 'none';
             resultPre.scrollIntoView({ behavior: "smooth" });
             return;
           }
@@ -220,6 +241,16 @@
           // Show fetch time
           fetchTime.textContent = `fetched in ${(t1 - t0) / 1000.0} sec`;
 
+          // Show raw data (pretty-printed JSON) only if data.raw exists
+          if (data.raw) {
+            rawDataContent.textContent = JSON.stringify(data.raw, null, 2);
+            rawDataGroup.style.display = 'block';
+            rawDataContent.style.display = 'none';
+            rawDataToggle.textContent = 'Rohdaten anzeigen';
+          } else {
+            rawDataGroup.style.display = 'none';
+          }
+
           // Draw path on map
           let latlngs = stops.filter(s => s.lat && s.lon).map(s => [s.lat, s.lon]);
           if (latlngs.length > 1) {
@@ -239,9 +270,12 @@
         .catch(err => {
           spinner.style.display = 'none';
           resultPre.style.display = 'block';
+          routeHeader.style.display = 'block';
           resultPre.style.color = "red";
           resultPre.textContent = "Fehler: " + err.message;
           fetchTime.textContent = "";
+          rawDataContent.textContent = "";
+          rawDataGroup.style.display = 'none';
           resultPre.scrollIntoView({ behavior: "smooth" });
         });
     });
