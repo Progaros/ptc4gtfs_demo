@@ -46,7 +46,7 @@ RUN python3 -m ptc4gtfs download-filter-gtfs "Stadtwerke München" -d ./data
 RUN python3 -m ptc4gtfs init-db ./data
 RUN python3 -m ptc4gtfs generate-graph -rt tram -rt ubahn
 
-CMD ["python3", "-m app.app"]
+CMD ["python3", "-m", "app.app"]
 ```
 
 ---
