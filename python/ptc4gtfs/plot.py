@@ -12,7 +12,7 @@ def plot_path_only_from_predecessors_networkx_ptc4gtfs_graph(db: GTFSDatabase, a
     """
     Plottet nur den Pfad-Graphen, der durch das predecessors-Dict von start_node zu end_node führt.
     """
-    # Pfad rekonstruieren
+    # Pfad aus Vorgängern rekonstruieren
     node_predecessors = dict()
     node_trip_ids = dict()
     for key, predecessor in predecessors.items():
@@ -31,12 +31,12 @@ def plot_path_only_from_predecessors_networkx_ptc4gtfs_graph(db: GTFSDatabase, a
         print("Kein Pfad gefunden!")
         return
 
-    # Nur den Pfad als eigenen Graphen erzeugen
+    # Erzeuge Graph nur für den Pfad
     G_path = nx.DiGraph()
     path_edges = list(zip(path[:-1], path[1:]))
     G_path.add_edges_from(path_edges)
 
-    # Labels: Stop-Name und Route-Name
+    # Labels für Knoten (Name, ID, Zeit, Trip)
     labels = {}
     for node in G_path.nodes():
         stop = db.get_stop_by_id(node)
@@ -44,6 +44,7 @@ def plot_path_only_from_predecessors_networkx_ptc4gtfs_graph(db: GTFSDatabase, a
         arrival_time = arrival_times[node]
         labels[node] = f"{stop_name}\nid={node}\n{arrival_time}\ntrip_id={node_trip_ids[node]}"
 
+    # Labels für Kanten (Route oder Teleport)
     edge_labels = {}
     for u, v in G_path.edges():
         print(f"{u}->{v}")
@@ -53,7 +54,7 @@ def plot_path_only_from_predecessors_networkx_ptc4gtfs_graph(db: GTFSDatabase, a
         else:
             edge_labels[(u, v)] = db.get_route_name_by_id(prev[1])
 
-    spacing = 10  # Abstand pro Knoten (z. B. 3 statt 1)
+    spacing = 10  # Abstand zwischen Knoten
     pos = {node: (i * spacing, 0) for i, node in enumerate(path)}
     plt.figure(figsize=figsize)
     nx.draw(G_path, pos, with_labels=False, node_color='red', edge_color='red', node_size=400, arrows=True)
@@ -64,6 +65,7 @@ def plot_path_only_from_predecessors_networkx_ptc4gtfs_graph(db: GTFSDatabase, a
     if export_path:
         plt.savefig(export_path, dpi=300, bbox_inches='tight')
 
+
 def plot_graph(db: GTFSDatabase, graph: nx.MultiDiGraph, route_to_color={
         17462: "#52822f",   # U1
         11853: "#c20831",   # U2
@@ -71,25 +73,25 @@ def plot_graph(db: GTFSDatabase, graph: nx.MultiDiGraph, route_to_color={
         2803:  "#00a984",   # U4
         4031:  "#bc7a00",   # U5
         21507: "#0065ae",   # U6
-        17359: "#52822f",   # U7 (gleiche Farbe wie U1)
-        12888: "#c20831",   # U8 (gleiche Farbe wie U2)
+        17359: "#52822f",   # U7 (wie U1)
+        12888: "#c20831",   # U8 (wie U2)
     }, random_default_route_color=True, export_path=None
 ):
     logger.info(f"{utils.BRIGHT_CYAN}Plot ptc4gtfs_graph({graph}) with route_to_color({route_to_color}){utils.RESET}")
-    # get all parentstion communityies
+    # Community-Zuordnung für Parent-Stationen
     node_to_community = dict()
     community_to_color = dict()
     parent_stations = db.get_all_parent_station()
     for parent_station in parent_stations:
-        # add child stations to parent community
+        # Child-Stations zuordnen
         child_stations = db.get_all_child_stops(float(parent_station['stop_id']))
         node_to_community[parent_station['stop_id']] = parent_station['stop_id']
         for child_station in child_stations:
             node_to_community[child_station['stop_id']] = parent_station['stop_id']
-        # set parent station community color
+        # Farbe für Community setzen
         community_to_color[parent_station['stop_id']] = "#%06x" % random.randint(0, 0xFFFFFF)
     
-      # 1) Geo-Positionen (Lon,Lat) sammeln für alle Stops im DB
+    # Geo-Positionen für alle Stops
     raw_pos = {
         stop['stop_id']: (stop['stop_lon'], stop['stop_lat'])
         for stop in db.get_all_stops()
@@ -100,7 +102,7 @@ def plot_graph(db: GTFSDatabase, graph: nx.MultiDiGraph, route_to_color={
         for n in graph.nodes() if n in raw_pos
     }
 
-    # 2) Farben und Labels
+    # Farben und Labels für Knoten
     node_colors = [
         [node_to_community[n]]
         for n in graph.nodes() if n in pos
@@ -108,7 +110,7 @@ def plot_graph(db: GTFSDatabase, graph: nx.MultiDiGraph, route_to_color={
     node_list = [n for n in graph.nodes() if n in pos]
     labels = {n: db.get_stop_by_id(n)['stop_name'] for n in node_list}
 
-    # color egedes
+    # Farben für Kanten bestimmen
     if random_default_route_color:
         routes_of_db = db.get_all_routes()
         for route in routes_of_db:
@@ -117,18 +119,18 @@ def plot_graph(db: GTFSDatabase, graph: nx.MultiDiGraph, route_to_color={
     
     egde_colors = []
     for a, b, attr in graph.edges(data=True):
-        # default color if filtering is not possible
+        # Standardfarbe, falls keine Route zugeordnet
         if not EdgeAttr.ROUTE_ID.value in attr:
             egde_colors.append('grey')
             continue
 
-        # is in route_ids color dict
+        # Farbe aus Dictionary
         if attr[EdgeAttr.ROUTE_ID.value] in route_to_color:
             EdgeAttr.ROUTE_ID.value
             egde_colors.append(route_to_color[attr[EdgeAttr.ROUTE_ID.value]])
             continue
 
-        # color through route type
+        # Farbe nach Routentyp
         route = db.get_route_by_id(attr[EdgeAttr.ROUTE_ID.value])
         if route:
             route_type = route[TB_RoutesAttr.ROUTE_TYPE.value] 
@@ -148,30 +150,30 @@ def plot_graph(db: GTFSDatabase, graph: nx.MultiDiGraph, route_to_color={
                 egde_colors.append(RouteTypeColor.UBAHN.value)
                 continue
 
-        # default color 
+        # Standardfarbe
         egde_colors.append('grey')  
 
-    # 3) Plot
+    # Plot erstellen
     fig, ax = plt.subplots(figsize=(10,10))
 
-    # 3a) Kanten
+    # Kanten zeichnen
     nx.draw_networkx_edges(
-        graph.subgraph(node_list),  # nur Kanten zwischen vorhandenen Pos
+        graph.subgraph(node_list),
         pos,
         ax=ax,
         width=0.5,
         alpha=0.3,
         edge_color=egde_colors
     )
-    # 3b) Knoten
+    # Knoten zeichnen
     nx.draw_networkx_nodes(
         graph.subgraph(node_list),
         pos,
         node_size=50,
-    node_color=node_colors,
+        node_color=node_colors,
         ax=ax
     )
-    # 3c) Labels
+    # Labels zeichnen
     nx.draw_networkx_labels(
         graph.subgraph(node_list),
         pos,
@@ -180,11 +182,10 @@ def plot_graph(db: GTFSDatabase, graph: nx.MultiDiGraph, route_to_color={
         ax=ax
     )
 
-    # 4) Feinschliff
+    # Achsen ausblenden, Layout anpassen
     ax.set_aspect('equal')
     ax.axis('off')
     plt.tight_layout()
     plt.show()
     if export_path:
         plt.savefig(export_path, dpi=300, bbox_inches='tight')
-    

@@ -1,3 +1,9 @@
-# G01-Kuerzeste-Wege-in-Graphen
+# Kürzeste Wege in Graphen
 
-[PTC4GTFS Demo](./python)
+## MVV Daten 
+
+[Readme](./python/ptc4gtfs/README.md)
+
+## Deployable Application
+
+[Readme](./python/app/README.md)

@@ -57,7 +57,7 @@
     Fehler: Ungültige oder nicht gefundene Station(en). <a href="{{ url_for('mvg_form') }}">Zurück zur Suche</a>
   </div>
   <script>
-    // Verhindere weitere JS-Ausführung
+    // Stoppe weitere JS-Ausführung bei Fehler
     document.addEventListener("DOMContentLoaded", function () {
       document.getElementById('spinner')?.remove();
       document.getElementById('path-result')?.remove();
@@ -91,7 +91,7 @@
     <pre id="path-result"
       style="background:#f8f8f8; padding:1em; border-radius:5px; max-height:400px; overflow:auto; display:none;"></pre>
 
-    <!-- Raw Data collapsible -->
+    <!-- Rohdaten ein-/ausklappbar -->
     <div class="collapsible-group" id="raw-data-group"
       style="margin-top:1.5em; box-shadow: none; padding: 0; margin: 0; display:none;">
       <div class="collapsible-header" id="raw-data-header" style="display:flex;align-items:center;cursor:pointer;">
@@ -109,6 +109,7 @@
     var toLat = {{ to_lat }};
     var toLon = {{ to_lon }};
 
+    // Karte initialisieren und Marker setzen
     var map = L.map('map').setView([(fromLat + toLat) / 2, (fromLon + toLon) / 2], 13);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -116,15 +117,15 @@
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // Add "From" marker with label
+    // Start-Marker
     L.marker([fromLat, fromLon]).addTo(map)
       .bindPopup('From: {{ from_station }}');
 
-    // Add "To" marker with label
+    // Ziel-Marker
     L.marker([toLat, toLon]).addTo(map)
       .bindPopup('To: {{ to_station }}');
 
-    // Draw Luftlinie between the markers
+    // Luftlinie zwischen Start und Ziel
     var polyline = L.polyline([
       [fromLat, fromLon],
       [toLat, toLon]
@@ -133,7 +134,7 @@
     var bounds = L.latLngBounds([[fromLat, fromLon], [toLat, toLon]]);
     map.fitBounds(bounds, { padding: [50, 50] });
 
-    // --- AJAX call to /find_path ---
+    // AJAX-Request für Pfadsuche
     document.addEventListener("DOMContentLoaded", function () {
       const spinner = document.getElementById('spinner');
       const resultPre = document.getElementById('path-result');
@@ -144,7 +145,7 @@
       const rawDataGroup = document.getElementById('raw-data-group');
       const routeHeader = document.getElementById('route-header');
 
-      // Collapsible logic for raw data (toggle text)
+      // Rohdaten ein-/ausklappen
       rawDataHeader.addEventListener('click', function () {
         const expanded = rawDataContent.style.display === 'block';
         rawDataContent.style.display = expanded ? 'none' : 'block';
@@ -179,10 +180,10 @@
             return;
           }
 
-          resultPre.style.color = ""; // Reset color on success
+          resultPre.style.color = "";
 
           if (data.segments) {
-            // Group consecutive segments by route_name
+            // Segmente nach Route gruppieren
             let grouped = [];
             let current = null;
             data.segments.forEach((seg, i) => {
@@ -195,7 +196,6 @@
                   stops: [seg.from_stop_name]
                 };
               }
-              // Only push to_stop_name if it's not already the last in the list
               if (current.stops[current.stops.length - 1] !== seg.to_stop_name) {
                 current.stops.push(seg.to_stop_name);
               }
@@ -203,7 +203,7 @@
               if (i === data.segments.length - 1 && current) grouped.push(current);
             });
 
-            // Build HTML with collapsible sections
+            // HTML für Segmente bauen
             let html = grouped.map((g, i) => {
               let stopsList = g.stops.map(s => `<li>${s}</li>`).join('');
               return `
@@ -219,7 +219,7 @@
 
             resultPre.innerHTML = html;
 
-            // Add expand/collapse logic
+            // Ein-/Ausklappen für Segmente
             resultPre.querySelectorAll('.collapsible-group').forEach(group => {
               const header = group.querySelector('.collapsible-header');
               const arrow = group.querySelector('.arrow');
@@ -231,17 +231,17 @@
               });
             });
           } else {
-            // fallback to old path output if needed
+            // Fallback: einfache Stop-Liste
             let text = stops.map((s, i) =>
               `${i + 1}. ${s.stop_name} (${s.stop_id}) [${s.lat}, ${s.lon}]`
             ).join('\n');
             resultPre.textContent = text;
           }
 
-          // Show fetch time
+          // Ladezeit anzeigen
           fetchTime.textContent = `fetched in ${(t1 - t0) / 1000.0} sec`;
 
-          // Show raw data (pretty-printed JSON) only if data.raw exists
+          // Rohdaten anzeigen, falls vorhanden
           if (data.raw) {
             rawDataContent.textContent = JSON.stringify(data.raw, null, 2);
             rawDataGroup.style.display = 'block';
@@ -251,15 +251,14 @@
             rawDataGroup.style.display = 'none';
           }
 
-          // Draw path on map
+          // Route auf Karte zeichnen
           let latlngs = stops.filter(s => s.lat && s.lon).map(s => [s.lat, s.lon]);
           if (latlngs.length > 1) {
             L.polyline(latlngs, { color: 'red', weight: 5 }).addTo(map);
             map.fitBounds(latlngs, { padding: [50, 50] });
-            // Remove luftlinie after route is drawn
             map.removeLayer(polyline);
           }
-          // Add markers for each stop
+          // Marker für jede Station
           stops.forEach(s => {
             if (s.lat && s.lon) {
               L.circleMarker([s.lat, s.lon], { radius: 6, color: 'red' }).addTo(map)

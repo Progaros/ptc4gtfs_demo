@@ -20,71 +20,70 @@ def dijkstra_ptc4gtfs(db: gtfs_db.GTFSDatabase, graph: nx.MultiDiGraph, start):
     distances[start] = 0
     predecessors = {}
     queue = [(0, start, None, None, arrival_times[start] )]
-    #dijkstra
+    # Dijkstra-Algorithmus
     while queue:
         curr_dist, curr_node, curr_route_id, curr_trip_id, arrival_time  = heapq.heappop(queue)
 
-        # Sie verhindert, dass du veraltete (schlechte) Einträge aus der Priority Queue verarbeitest.
+        # Verhindert, dass veraltete (schlechte) Einträge aus der Priority Queue verarbeitet werden.
         if curr_dist > distances[curr_node]:
             continue
 
         for neighbor, edge_list in graph[curr_node].items():
             for _, edge in edge_list.items():
+                # Normales Gewicht ist die Dauer für eine Geh-Kante  
                 weight = edge.get('weight', 1)
                 distance = curr_dist
                 edge_route_id = None
                 edge_trip_id = None
-                # Edge Weight handling:
+                # Behandlung der Kantengewichte:
                 if edge[model.EdgeAttr.TYPE.value] == model.EdgeType.TRANSIT.value:
                     edge_route_id = edge.get('route_id', None)
-                    # check if edge route ist same as current route
-                    # if not no waiting need to be added to weight
+                    # Prüfe, ob die Kante zur aktuellen Route gehört
+                    # Falls nicht, muss ggf. Wartezeit zum Gewicht addiert werden
                     if edge_route_id:
-                        # get next deparute for stop and route
+                        # Hole nächste Abfahrt für Haltestelle und Route
                         next_dep = utils.get_next_departure_today_dict(deparutes_dict, curr_node, edge_route_id, arrival_time.strftime("%H:%M:%S"))
 
-                        # if no match look for next depature
-                        # get trip by stop id, trip id (stop_times)
+                        # Falls keine passende Fahrt gefunden, suche nächste Abfahrt
+                        # Prüfe, ob der Trip zur Kante passt
                         if edge_route_id != curr_route_id or (curr_trip_id and not db.get_trip_by_trip_id_and_stop_id(curr_trip_id, neighbor)):
                             
-                            # check if deparute exists    
+                            # Prüfe, ob Abfahrt existiert    
                             if next_dep is None:
-                                logger.warning(f"Next Departure for route({edge_route_id}) by stop({curr_node}) not exists")
+                                logger.warning(f"Next Departure for route({edge_route_id}) by stop({curr_node}) does not exist")
                                 continue
                             
-                            # clac wait seconds
+                            # Berechne Wartezeit in Sekunden
                             edge_trip_id = next_dep[gtfs_db.TB_DeparturesTodayAttr.TRIP_ID.value]
                             dep_time = next_dep[gtfs_db.TB_DeparturesTodayAttr.DEPARTURE_TIME.value]
                             dep_dt = utils.parse_gtfs_time_ref_date(dep_time, arrival_time.date())
                             wait_seconds = (dep_dt - arrival_time).total_seconds()
 
-                            # check if wait seconds are valid
+                            # Prüfe, ob Wartezeit gültig ist
                             if wait_seconds < 0:
                                 logger.warning(f"Wait seconds({wait_seconds}) for next Departure for route({edge_route_id}) by stop({curr_node}) is < 0")
                                 continue
                             
-                            # calc new weight
+                            # Addiere Wartezeit zum Gewicht
                             weight += wait_seconds
                         else:
                             edge_trip_id = curr_trip_id
-                # Normal weight ist duration for walking edge  
-                # elif edge[model.EdgeAttr.TYPE.value] == model.EdgeType.WALK.value:                
                     
-                # By Teleportation weight is always 0
+                # Bei Teleportation ist das Gewicht immer 0
                 elif edge[model.EdgeAttr.TYPE.value] == model.EdgeType.TELEPORT.value:
                     weight = 0
  
-                # calc time and new distance   
-                arrivale_time_to_neighboar = arrival_time + timedelta(seconds=weight)
+                # Berechne neue Ankunftszeit und Distanz
+                arrival_time_to_neighbor = arrival_time + timedelta(seconds=weight)
                 distance += weight
 
-                # wenn das gehen via eine kante den nachbarn knoten schneller ericht 
-                # setzte diese note als prev
+                # Wenn das Gehen über eine Kante den Nachbarknoten schneller erreicht,
+                # setze diesen Knoten als Vorgänger
                 if distance < distances[neighbor]:
                     distances[neighbor] = distance
                     predecessors[neighbor] = (curr_node, edge_route_id, edge_trip_id)
-                    arrival_times[neighbor] = arrivale_time_to_neighboar
-                    heapq.heappush(queue, (distance, neighbor, edge.get('route_id', None), edge_trip_id, arrivale_time_to_neighboar))
+                    arrival_times[neighbor] = arrival_time_to_neighbor
+                    heapq.heappush(queue, (distance, neighbor, edge.get('route_id', None), edge_trip_id, arrival_time_to_neighbor))
 
     print(f"------------dijkstra_ptc4model_db({start}, graph=({graph}), distances_len={len(distances)}, predecessors_len={len(predecessors)}, arrival_times_len={len(arrival_times)})------------{utils.RESET}")
     return distances, predecessors, arrival_times

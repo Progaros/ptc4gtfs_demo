@@ -1,11 +1,13 @@
 import os
 import logging
 import pandas as pd
-from sqlalchemy import create_engine, MetaData, select, func, text
+from sqlalchemy import create_engine, MetaData, select, func, text, bindparam
 from datetime import datetime
 from . import utils
 from enum import IntEnum
 from enum import StrEnum
+from collections import defaultdict, OrderedDict
+import networkx as nx
 
 # for better and safer db tables properties access
 class TB_StopsAttr(StrEnum):
@@ -138,6 +140,7 @@ class GTFSDatabase:
         self.tables = {name: table for name, table in self.metadata.tables.items()}
         logger.debug(f"{utils.UNDERLINE}{utils.YELLOW}GTFSDatabase initialisiert mit URL: {db_url}{utils.RESET}")
 
+    # Gibt den Datensatz aus stop_times für eine bestimmte trip_id und stop_id zurück.
     def get_trip_by_trip_id_and_stop_id(self, trip_id, stop_id):
         with self.engine.connect() as conn:
             query = text("""
@@ -154,6 +157,7 @@ class GTFSDatabase:
                 return None
             return dict(result._mapping)
 
+    # Gibt alle Routen eines bestimmten Typs zurück.
     def get_routes_by_route_type(self, route_type: RouteType):
         with self.engine.connect() as conn:
             query = text("""
@@ -163,6 +167,7 @@ class GTFSDatabase:
             results =  conn.execute(query, {TB_RoutesAttr.ROUTE_TYPE.value: route_type.value}).fetchall()
             return [dict(row._mapping) for row in results if row is not None] 
 
+    # Gibt den Datensatz aus stop_times für eine bestimmte stop_id und route_id zurück.
     def get_trip_stop_by_stop_and_route_id(self, stop_id, route_id):
         with self.engine.connect() as conn:
             query = text("""
@@ -181,6 +186,7 @@ class GTFSDatabase:
                 return None
             return dict(result._mapping)
 
+    # Gibt die Routendetails für eine bestimmte route_id zurück.
     def get_route_by_id(self, route_id):
         with self.engine.connect() as conn:
             query = text("""
@@ -190,6 +196,7 @@ class GTFSDatabase:
             result =  conn.execute(query, {TB_RoutesAttr.ROUTE_ID.value: int(route_id)}).fetchone()
             return dict(result._mapping) if result else None   
 
+    # Gibt alle Trips für eine bestimmte route_id zurück.
     def get_trips_by_route_id(self, route_id):
         with self.engine.connect() as conn:
             query = text("""
@@ -199,6 +206,7 @@ class GTFSDatabase:
             results =  conn.execute(query, {TB_TripsAttr.ROUTE_ID.value: int(route_id)}).fetchall()
             return [dict(row._mapping) for row in results if row is not None]        
 
+    # Gibt alle Haltestellen der Datenbank zurück.
     def get_all_stops(self):
         with self.engine.connect() as conn:
             query = text("""
@@ -207,48 +215,51 @@ class GTFSDatabase:
             results =  conn.execute(query).fetchall()
             return [dict(row._mapping) for row in results if row is not None]        
     
-    # ein tupel aus einem sortiertem array aus (hinfahrt, rückfahrt) mit sortierted stop_id (kein parent)
-    # ein array aus max länge trips 
+    # Gibt alle Stop-Muster einer Route zurück, gruppiert nach einzelnen Fahrten (Trips) und fasst ähnliche Muster zusammen
     def get_hole_route_stops_from_stop_times_by_route_id(self, route_id):
-        trips_to_route_id = self.get_trips_by_route_id(route_id)
-        route_trips_with_stops = dict()
-        # outbound_route_stop_ids = [] # hinfahrt
-        # inbound_route_stop_ids = [] # Rückfahrt
-        for trip in trips_to_route_id:
-            # get sequence of stops for trip_id
-            with self.engine.connect() as conn:
-                query = text("""
-                    SELECT * FROM stop_times
-                    WHERE trip_id=:trip_id
-                """)
-                results =  conn.execute(query, {TB_StopTimesAttr.TRIP_ID.value: int(trip[TB_TripsAttr.TRIP_ID.value])}).fetchall()
-                # convert to dupel set
-                FIELDS = [TB_StopTimesAttr.STOP_ID.value, TB_StopTimesAttr.STOP_SEQUENCE.value]
-                found_trip_with_stops = set(
-                    tuple(row._mapping[field] for field in FIELDS)
-                    for row in results
-                    if row is not None
-                )
-            
-            # decide if trip is part of outbound or inbound
-            match = False
-            for index, trip_with_stops in route_trips_with_stops.items():
-                if found_trip_with_stops.issubset(trip_with_stops):
-                    route_trips_with_stops[index] = found_trip_with_stops.union(trip_with_stops)
-                    match = True
-                    break
-                if trip_with_stops.issubset(found_trip_with_stops):
-                    route_trips_with_stops[index] = trip_with_stops.union(found_trip_with_stops)
-                    match = True
-                    break
-            if not match:
-                route_trips_with_stops[len(route_trips_with_stops)] = found_trip_with_stops
-        logger.debug(f"{utils.BRIGHT_GREEN}trips_with_stops for route_id={route_id}: {route_trips_with_stops}{utils.RESET}")    
-        logger.debug(f"{utils.BRIGHT_GREEN}size for route_id={route_id}: {len(route_trips_with_stops)}{utils.RESET}")    
-        
-        # resulting trips_with_stops
-        return route_trips_with_stops
+        with self.engine.connect() as conn:
+            trip_rows = conn.execute(
+                text("SELECT trip_id FROM trips WHERE route_id = :rid"),
+                {"rid": int(route_id)}
+            ).fetchall()
+            trip_ids = [row[0] for row in trip_rows]
+            if not trip_ids:
+                return {}
 
+        stop_times_query = (
+            text("""
+                SELECT trip_id, stop_id, stop_sequence
+                FROM stop_times
+                WHERE trip_id IN :tids
+                ORDER BY trip_id, stop_sequence
+            """)
+            .bindparams(bindparam("tids", expanding=True))
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(stop_times_query, {"tids": trip_ids}).fetchall()
+
+        trip_to_stops: dict[int, list[tuple[int, int]]] = defaultdict(list)
+        for trip_id, stop_id, stop_seq in rows:
+            trip_to_stops[trip_id].append((stop_id, stop_seq))
+
+        patterns: list[list[tuple[int, int]]] = []
+        for stops in trip_to_stops.values():
+            s_set = set(stops)
+            merged = False
+            for idx, pat in enumerate(patterns):
+                p_set = set(pat)
+                if s_set.issubset(p_set) or p_set.issubset(s_set):
+                    longer, shorter = (pat, stops) if len(pat) >= len(stops) else (stops, pat)
+                    merged_list = list(OrderedDict.fromkeys(longer + shorter))
+                    patterns[idx] = merged_list
+                    merged = True
+                    break
+            if not merged:
+                patterns.append(stops.copy())
+
+        return {i: patterns[i] for i in range(len(patterns))}
+
+    # Gibt die Parent-Station für eine stop_id zurück oder die Haltestelle selbst, falls sie Parent ist.
     def get_parent_stop_by_stop_id(self, stop_id):
         if stop_id is None:
             logger.warning(f"stop_id is None")
@@ -268,6 +279,7 @@ class GTFSDatabase:
                     result =  conn.execute(query, {"parent_stop_id": int(stop['parent_station'])}).fetchone()
             return dict(result._mapping) if result else None     
 
+    # Gibt alle Child-Stops für eine parent_station_id zurück.
     def get_all_child_stops(self, parent_station_id: float):
         with self.engine.connect() as conn:
             query = text("""
@@ -277,6 +289,7 @@ class GTFSDatabase:
             results =  conn.execute(query, {"parent_station": parent_station_id}).fetchall()
             return [dict(row._mapping) for row in results if row is not None]
 
+    # Gibt alle Routen der Datenbank zurück.
     def get_all_routes(self):
         with self.engine.connect() as conn:
             query = text("""
@@ -285,10 +298,8 @@ class GTFSDatabase:
             results =  conn.execute(query).fetchall()
             return [dict(row._mapping) for row in results if row is not None]
 
+    # Gibt eine Übersicht aller Tabellen in der Datenbank inkl. Eintragsanzahl aus.
     def inspect_db(self):
-        """
-        Gibt eine Übersicht aller Tabellen in der Datenbank inkl. Eintragsanzahl aus.
-        """
         with self.engine.connect() as conn:
             result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table';"))
             tables = result.fetchall()
@@ -300,12 +311,8 @@ class GTFSDatabase:
                 count = conn.execute(text(f"SELECT COUNT(*) FROM {table_name};")).scalar()
                 logger.info(f"  - {table_name}: {count} Einträge")
 
+    # Lädt GTFS-Daten aus Textdateien in die Datenbank.
     def load_gtfs_feed(self, gtfs_dir):
-        """
-        Lädt GTFS-Daten aus Textdateien in die Datenbank.
-
-        :param gtfs_dir: Verzeichnis mit GTFS-Dateien (z. B. agency.txt, routes.txt, etc.)
-        """
         with self.engine.connect() as conn:
             for file in files:
                 file_path = os.path.join(gtfs_dir, file)
@@ -317,35 +324,19 @@ class GTFSDatabase:
                 else:
                     logger.warning(f"Datei {file} nicht gefunden – übersprungen.")
     
+       # Gibt ein SQLAlchemy-Tabellenobjekt zurück.
     def get_table(self, name):
-        """
-        Gibt ein SQLAlchemy-Tabellenobjekt zurück.
-
-        :param name: Tabellenname
-        :return: Table-Objekt oder None
-        """
         return self.tables.get(name)
 
+    # Holt Details einer Haltestelle anhand ihrer ID.
     def get_stop_by_id(self, stop_id):
-        """
-        Holt Details einer Haltestelle anhand ihrer ID.
-
-        :param stop_id: Haltestellen-ID
-        :return: Dictionary mit Haltestelleninfos
-        """
         with self.engine.connect() as conn:
             query = text("SELECT * FROM stops WHERE stop_id = :stop_id LIMIT 1")
             result = conn.execute(query, {TB_StopsAttr.STOP_ID.value: stop_id}).fetchone()
-
         return dict(result._mapping) if result else None
 
+    # Gibt alle Routen zurück, die eine bestimmte Haltestelle bedienen.
     def get_routes_for_stop_id(self, stop_id):
-        """
-        Gibt alle Routen zurück, die eine bestimmte Haltestelle bedienen.
-
-        :param stop_id: Haltestellen-ID
-        :return: Liste von Routen-IDs
-        """
         with self.engine.connect() as conn:
             query = text("""
                 SELECT DISTINCT trips.route_id
@@ -357,13 +348,8 @@ class GTFSDatabase:
             result = conn.execute(query, {TB_StopTimesAttr.STOP_ID.value: stop_id}).fetchall()
         return [row[0] for row in result]
 
+    # Gibt alle Haltestellen-IDs einer Route zurück.
     def get_stops_id_by_route_id(self, route_id):
-        """
-        Gibt alle Haltestellen-IDs zurück, die mit einer bestimmten Route verknüpft sind.
-
-        :param route_id: Routen-ID
-        :return: Liste von Haltestellen-IDs
-        """
         trips = self.get_table('trips')
         stop_times = self.get_table('stop_times')
         subq = select(trips.c.trip_id).where(trips.c.route_id == str(route_id))
@@ -372,13 +358,8 @@ class GTFSDatabase:
             results = sorted([row[0] for row in conn.execute(stmt).fetchall()])
         return results
 
+    # Gibt den Namen einer Route zurück.
     def get_route_name_by_id(self, route_id):
-        """
-        Gibt den vollständigen Namen einer Route zurück.
-
-        :param route_id: Routen-ID
-        :return: Kurz- oder Langname der Route
-        """
         routes = self.get_table('routes')
         stmt = select(routes.c.route_short_name, routes.c.route_long_name).where(
             routes.c.route_id == str(route_id)
@@ -390,12 +371,8 @@ class GTFSDatabase:
         short, long_name = row
         return short or long_name
 
-    def get_all_parent_station(self):
-        """
-        Gibt alle Haltestellen zurück, die keine übergeordnete Station (parent_station) haben.
-
-        :return: Liste von Dictionaries mit Haltestelleninfos
-        """
+    # Gibt alle Haltestellen ohne Parent-Station zurück.
+    def get_all_parent_station(self, graph: nx.MultiDiGraph = None):
         with self.engine.connect() as conn:
             query = text("""
                 SELECT * FROM stops
@@ -404,12 +381,16 @@ class GTFSDatabase:
             result_proxy = conn.execute(query)
             keys = result_proxy.keys()
             rows = result_proxy.fetchall()
-        return [dict(zip(keys, row)) for row in rows] if rows else []
+        result = [dict(zip(keys, row)) for row in rows] if rows else []
+        
+        if graph is not None:
+            # Filtere nach existierenden Knoten im Graphen
+            result = [item for item in result if int(item[TB_StopsAttr.STOP_ID.value]) in graph.nodes]
+        
+        return result
 
+    # Gibt die nächste Abfahrt für eine Haltestelle und Route heute zurück.
     def get_next_departure_today(self, stop_id, route_id, current_time=None):
-        """
-        Gibt die nächste Abfahrt für stop_id/route_id für heute zurück (aus departures_today).
-        """
         if current_time is None:
             current_time = datetime.now().strftime("%H:%M:%S")
         with self.engine.connect() as conn:
@@ -428,10 +409,8 @@ class GTFSDatabase:
             }).fetchone()
             return dict(result._mapping) if result else None
 
+    # Erstellt die Tabelle departures_today für alle gültigen Abfahrten heute.
     def create_departures_today(self):
-        """
-        Erstellt eine Tabelle departures_today mit allen gültigen Abfahrten für heute.
-        """
         today = datetime.now().strftime('%Y%m%d')
         weekday = datetime.now().strftime('%A').lower()
         with self.engine.connect() as conn:
@@ -457,10 +436,8 @@ class GTFSDatabase:
             """), {"today": int(today)})
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dep_today_stop_route_time ON departures_today (stop_id, route_id, departure_time)"))
     
+    # Gibt alle Abfahrten aus departures_today zurück.
     def get_all_departures_today(self):
-        """
-        Gibt alle Abfahrten aus departures_today als Liste von Dictionaries zurück.
-        """
         with self.engine.connect() as conn:
             query = text("SELECT * FROM departures_today")
             result = conn.execute(query).fetchall()

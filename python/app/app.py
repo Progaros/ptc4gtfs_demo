@@ -8,14 +8,15 @@ from zoneinfo import ZoneInfo
 
 app = Flask(__name__)
 db = GTFSDatabase("sqlite:///./gtfs.db")
+graph = load_networkx_ptc4gtfs_graph()
 
-
-def load_stops():
-    return db.get_all_parent_station()
+def load_stops(graph):
+    # Lade alle übergeordneten Haltestellen (Stationen)
+    return db.get_all_parent_station(graph)
 
 
 def clean_inf(obj):
-    """Recursively replace inf/nan with None for JSON serialization."""
+    # Ersetzt inf/nan durch None für JSON
     if isinstance(obj, dict):
         return {k: clean_inf(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -32,26 +33,27 @@ def clean_inf(obj):
 
 @app.route("/", methods=["GET"])
 def mvg_form():
-    stops = load_stops()
+    # Zeige Suchformular mit allen Stationen
+    stops = load_stops(graph)
     return render_template("search.html", stops=stops)
 
 
 @app.route("/find_path", methods=["POST"])
 def find_path_route():
+    # Suche Route zwischen zwei Stationen
     from_id = request.form.get("from_id")
     to_id = request.form.get("to_id")
 
     if not from_id or not to_id:
         return jsonify({"error": "Beide Stationen müssen ausgewählt werden."}), 400
 
-    stops = load_stops()
+    stops = load_stops(graph)
     if not any(str(s["stop_id"]) == str(from_id) for s in stops) or not any(
         str(s["stop_id"]) == str(to_id) for s in stops
     ):
         return jsonify({"error": "Ungültige Station(en) ausgewählt."}), 400
 
     try:
-        graph = load_networkx_ptc4gtfs_graph()
         db.create_departures_today()
         results_data = find_path_in_ptc4gtfs_graph(db, from_id, to_id, graph)
         print(f"Results Data: {results_data}")
@@ -64,7 +66,7 @@ def find_path_route():
         if not path_nodes:
             return jsonify({"error": "Keine Route gefunden."}), 404
 
-        # Build segments: from_stop, route_id, route_name, to_stop
+        # Baue Segmente für die Anzeige
         segments = []
         for i in range(len(path_nodes) - 1):
             from_node = path_nodes[i]
@@ -94,7 +96,7 @@ def find_path_route():
                 }
             )
 
-        # Build stops list for map drawing
+        # Baue Liste der Haltestellen für die Karte
         stops_list = []
         for node in path_nodes:
             stop_id = str(node[0])
@@ -108,7 +110,7 @@ def find_path_route():
                 }
             )
 
-        # Clean all data for JSON serialization
+        # Daten für JSON-Ausgabe bereinigen
         response_data = {
             "segments": clean_inf(segments),
             "stops": clean_inf(stops_list),
@@ -121,7 +123,8 @@ def find_path_route():
 
 @app.route("/result", methods=["GET"])
 def result():
-    stops = load_stops()
+    # Zeige Ergebnisansicht mit Kartenpositionen
+    stops = load_stops(graph)
     from_id = request.args.get("from_id")
     to_id = request.args.get("to_id")
     from_stop = next((s for s in stops if str(s["stop_id"]) == str(from_id)), None)
@@ -146,4 +149,5 @@ def result():
 
 
 if __name__ == "__main__":
+    # Starte Flask-App
     app.run(debug=False, host="0.0.0.0")
